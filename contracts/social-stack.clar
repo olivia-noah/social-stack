@@ -213,3 +213,130 @@
 (define-read-only (get-next-post-id)
   (var-get next-post-id)
 )
+
+;; Calculate dynamic reputation score
+(define-read-only (calculate-reputation-score (profile-id uint))
+  (match (get-profile profile-id)
+    profile-data (let (
+        (base-score (get staked-amount profile-data))
+        (follower-bonus (* (get follower-count profile-data) u1000))
+        (endorsement-bonus (* (get total-endorsements profile-data) u2000))
+        (post-bonus (* (get post-count profile-data) u500))
+      )
+      (+ base-score (+ follower-bonus (+ endorsement-bonus post-bonus)))
+    )
+    u0
+  )
+)
+
+;; PROFILE MANAGEMENT FUNCTIONS
+
+;; Create new user profile with initial stake
+(define-public (create-profile
+    (username (string-ascii 50))
+    (bio (string-utf8 280))
+    (avatar-url (string-ascii 200))
+  )
+  (let (
+      (profile-id (var-get next-profile-id))
+      (current-block stacks-block-height)
+    )
+    ;; Validate profile creation requirements
+    (asserts! (is-none (map-get? principal-to-profile tx-sender))
+      ERR_PROFILE_EXISTS
+    )
+    (asserts! (is-username-available username) ERR_PROFILE_EXISTS)
+    (asserts! (>= (stx-get-balance tx-sender) MIN_PROFILE_STAKE)
+      ERR_INSUFFICIENT_FUNDS
+    )
+    ;; Lock initial stake
+    (try! (stx-transfer? MIN_PROFILE_STAKE tx-sender (as-contract tx-sender)))
+    ;; Initialize profile data
+    (map-set profiles { profile-id: profile-id } {
+      owner: tx-sender,
+      username: username,
+      bio: bio,
+      avatar-url: avatar-url,
+      created-at: current-block,
+      staked-amount: MIN_PROFILE_STAKE,
+      reputation-score: MIN_PROFILE_STAKE,
+      follower-count: u0,
+      following-count: u0,
+      post-count: u0,
+      total-endorsements: u0,
+      is-active: true,
+    })
+    ;; Register identity mappings
+    (map-set username-to-profile username profile-id)
+    (map-set principal-to-profile tx-sender profile-id)
+    (map-set profile-stakes {
+      profile-id: profile-id,
+      staker: tx-sender,
+    } {
+      amount: MIN_PROFILE_STAKE,
+      staked-at: current-block,
+    })
+    ;; Increment profile counter
+    (var-set next-profile-id (+ profile-id u1))
+    (ok profile-id)
+  )
+)
+
+;; Update profile metadata
+(define-public (update-profile
+    (bio (string-utf8 280))
+    (avatar-url (string-ascii 200))
+  )
+  (let ((profile-result (map-get? principal-to-profile tx-sender)))
+    (match profile-result
+      profile-id (match (get-profile profile-id)
+        profile-data (begin
+          (map-set profiles { profile-id: profile-id }
+            (merge profile-data {
+              bio: bio,
+              avatar-url: avatar-url,
+            })
+          )
+          (ok true)
+        )
+        ERR_PROFILE_NOT_FOUND
+      )
+      ERR_PROFILE_NOT_FOUND
+    )
+  )
+)
+
+;; Increase reputation stake
+(define-public (stake-for-reputation (amount uint))
+  (let (
+      (profile-result (map-get? principal-to-profile tx-sender))
+      (current-block stacks-block-height)
+    )
+    ;; Validate staking parameters
+    (asserts! (>= amount MIN_POST_BOOST) ERR_INVALID_AMOUNT)
+    (asserts! (>= (stx-get-balance tx-sender) amount) ERR_INSUFFICIENT_FUNDS)
+    (match profile-result
+      profile-id (begin
+        ;; Lock additional stake
+        (try! (stx-transfer? amount tx-sender (as-contract tx-sender)))
+        ;; Update profile stake amount
+        (match (get-profile profile-id)
+          profile-data (map-set profiles { profile-id: profile-id }
+            (merge profile-data { staked-amount: (+ (get staked-amount profile-data) amount) })
+          )
+          false
+        )
+        ;; Record stake transaction
+        (map-set profile-stakes {
+          profile-id: profile-id,
+          staker: tx-sender,
+        } {
+          amount: amount,
+          staked-at: current-block,
+        })
+        (ok true)
+      )
+      ERR_PROFILE_NOT_FOUND
+    )
+  )
+)
