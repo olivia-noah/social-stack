@@ -340,3 +340,117 @@
     )
   )
 )
+
+;; SOCIAL GRAPH FUNCTIONS
+
+;; Follow another user
+(define-public (follow-user (following-id uint))
+  (let (
+      (follower-profile-result (map-get? principal-to-profile tx-sender))
+      (current-block stacks-block-height)
+    )
+    (match follower-profile-result
+      follower-id (begin
+        ;; Validate follow operation
+        (asserts! (not (is-eq follower-id following-id)) ERR_SELF_FOLLOW)
+        (asserts! (is-some (get-profile following-id)) ERR_PROFILE_NOT_FOUND)
+        (asserts! (not (is-following follower-id following-id))
+          ERR_ALREADY_FOLLOWING
+        )
+        ;; Establish follow relationship
+        (map-set following {
+          follower: follower-id,
+          following: following-id,
+        } {
+          followed-at: current-block,
+          is-active: true,
+        })
+        ;; Update follower count
+        (match (get-profile following-id)
+          following-profile (map-set profiles { profile-id: following-id }
+            (merge following-profile { follower-count: (+ (get follower-count following-profile) u1) })
+          )
+          false
+        )
+        ;; Update following count
+        (match (get-profile follower-id)
+          follower-profile (map-set profiles { profile-id: follower-id }
+            (merge follower-profile { following-count: (+ (get following-count follower-profile) u1) })
+          )
+          false
+        )
+        (ok true)
+      )
+      ERR_PROFILE_NOT_FOUND
+    )
+  )
+)
+
+;; Unfollow a user
+(define-public (unfollow-user (following-id uint))
+  (let ((follower-profile-result (map-get? principal-to-profile tx-sender)))
+    (match follower-profile-result
+      follower-id (begin
+        ;; Validate unfollow operation
+        (asserts! (is-following follower-id following-id) ERR_NOT_FOLLOWING)
+        ;; Remove follow relationship
+        (map-delete following {
+          follower: follower-id,
+          following: following-id,
+        })
+        ;; Decrement follower count
+        (match (get-profile following-id)
+          following-profile (map-set profiles { profile-id: following-id }
+            (merge following-profile { follower-count: (- (get follower-count following-profile) u1) })
+          )
+          false
+        )
+        ;; Decrement following count
+        (match (get-profile follower-id)
+          follower-profile (map-set profiles { profile-id: follower-id }
+            (merge follower-profile { following-count: (- (get following-count follower-profile) u1) })
+          )
+          false
+        )
+        (ok true)
+      )
+      ERR_PROFILE_NOT_FOUND
+    )
+  )
+)
+
+;; CONTENT CREATION AND MONETIZATION
+
+;; Publish new content
+(define-public (create-post (content (string-utf8 500)))
+  (let (
+      (author-profile-result (map-get? principal-to-profile tx-sender))
+      (post-id (var-get next-post-id))
+      (current-block stacks-block-height)
+    )
+    (match author-profile-result
+      author-id (begin
+        ;; Create post record
+        (map-set posts { post-id: post-id } {
+          author: author-id,
+          content: content,
+          created-at: current-block,
+          boosted-amount: u0,
+          endorsement-count: u0,
+          is-active: true,
+        })
+        ;; Update author's post count
+        (match (get-profile author-id)
+          author-profile (map-set profiles { profile-id: author-id }
+            (merge author-profile { post-count: (+ (get post-count author-profile) u1) })
+          )
+          false
+        )
+        ;; Increment post counter
+        (var-set next-post-id (+ post-id u1))
+        (ok post-id)
+      )
+      ERR_PROFILE_NOT_FOUND
+    )
+  )
+)
