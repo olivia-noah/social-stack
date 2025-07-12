@@ -546,3 +546,67 @@
     )
   )
 )
+
+;; Endorse user profile with testimonial
+(define-public (endorse-profile
+    (endorsed-id uint)
+    (stake-amount uint)
+    (message (string-utf8 140))
+  )
+  (let (
+      (endorser-profile-result (map-get? principal-to-profile tx-sender))
+      (current-block stacks-block-height)
+    )
+    ;; Validate endorsement parameters
+    (asserts! (>= stake-amount MIN_ENDORSEMENT_STAKE) ERR_INVALID_AMOUNT)
+    (asserts! (is-some (get-profile endorsed-id)) ERR_PROFILE_NOT_FOUND)
+    (match endorser-profile-result
+      endorser-id (begin
+        ;; Prevent self-endorsement and duplicates
+        (asserts! (not (is-eq endorser-id endorsed-id)) ERR_UNAUTHORIZED)
+        (asserts!
+          (is-none (map-get? profile-endorsements {
+            endorser: endorser-id,
+            endorsed: endorsed-id,
+          }))
+          ERR_ALREADY_ENDORSED
+        )
+        (asserts! (>= (stx-get-balance tx-sender) stake-amount)
+          ERR_INSUFFICIENT_FUNDS
+        )
+        ;; Lock endorsement stake
+        (try! (stx-transfer? stake-amount tx-sender (as-contract tx-sender)))
+        ;; Record profile endorsement
+        (map-set profile-endorsements {
+          endorser: endorser-id,
+          endorsed: endorsed-id,
+        } {
+          endorsed-at: current-block,
+          stake-amount: stake-amount,
+          message: message,
+        })
+        ;; Update endorsed profile reputation
+        (match (get-profile endorsed-id)
+          endorsed-profile (map-set profiles { profile-id: endorsed-id }
+            (merge endorsed-profile { total-endorsements: (+ (get total-endorsements endorsed-profile) u1) })
+          )
+          false
+        )
+        (ok true)
+      )
+      ERR_PROFILE_NOT_FOUND
+    )
+  )
+)
+
+;; PROTOCOL ADMINISTRATION
+
+;; Update protocol fee structure
+(define-public (set-protocol-fee-rate (new-rate uint))
+  (begin
+    (asserts! (is-eq tx-sender CONTRACT_OWNER) ERR_UNAUTHORIZED)
+    (asserts! (<= new-rate u1000) ERR_INVALID_AMOUNT) ;; Maximum 10% fee
+    (var-set protocol-fee-rate new-rate)
+    (ok true)
+  )
+)
