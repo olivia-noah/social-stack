@@ -107,3 +107,109 @@
     is-active: bool,
   }
 )
+
+;; Content Endorsement Registry
+(define-map post-endorsements
+  {
+    post-id: uint,
+    endorser: uint,
+  }
+  {
+    endorsed-at: uint,
+    stake-amount: uint,
+  }
+)
+
+;; Profile Reputation System
+(define-map profile-endorsements
+  {
+    endorser: uint,
+    endorsed: uint,
+  }
+  {
+    endorsed-at: uint,
+    stake-amount: uint,
+    message: (string-utf8 140),
+  }
+)
+
+;; Staking Pool Management
+(define-map profile-stakes
+  {
+    profile-id: uint,
+    staker: principal,
+  }
+  {
+    amount: uint,
+    staked-at: uint,
+  }
+)
+
+;; Content Monetization Tracking
+(define-map post-boosts
+  {
+    post-id: uint,
+    booster: principal,
+  }
+  {
+    amount: uint,
+    boosted-at: uint,
+  }
+)
+
+;; READ-ONLY QUERY FUNCTIONS
+
+;; Retrieve profile by unique ID
+(define-read-only (get-profile (profile-id uint))
+  (map-get? profiles { profile-id: profile-id })
+)
+
+;; Lookup profile by username
+(define-read-only (get-profile-by-username (username (string-ascii 50)))
+  (match (map-get? username-to-profile username)
+    profile-id (get-profile profile-id)
+    none
+  )
+)
+
+;; Find profile by wallet address
+(define-read-only (get-profile-by-principal (user principal))
+  (match (map-get? principal-to-profile user)
+    profile-id (get-profile profile-id)
+    none
+  )
+)
+
+;; Check username availability
+(define-read-only (is-username-available (username (string-ascii 50)))
+  (is-none (map-get? username-to-profile username))
+)
+
+;; Verify following relationship
+(define-read-only (is-following
+    (follower-id uint)
+    (following-id uint)
+  )
+  (match (map-get? following {
+    follower: follower-id,
+    following: following-id,
+  })
+    follow-data (get is-active follow-data)
+    false
+  )
+)
+
+;; Retrieve content by post ID
+(define-read-only (get-post (post-id uint))
+  (map-get? posts { post-id: post-id })
+)
+
+;; Get next available profile ID
+(define-read-only (get-next-profile-id)
+  (var-get next-profile-id)
+)
+
+;; Get next available post ID
+(define-read-only (get-next-post-id)
+  (var-get next-post-id)
+)
